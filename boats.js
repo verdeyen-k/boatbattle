@@ -226,7 +226,7 @@
   // Fire whatever's loaded. Online, the shot is shared so every device can fly it too.
   function fire(b) {
     const kind = b.kind || 'ball', K = SHOTS[kind];
-    b.cool = K.reload * (b.bot ? 1.7 : 1);
+    b.cool = K.reload * (b.bot ? botSkill.reload : 1);
     if (b.kind && --b.ammo <= 0) { b.kind = null; b.ammo = 0; }
     const shot = { b: b.id, k: kind, x: Math.round(b.x + Math.cos(b.a) * BOW), y: Math.round(b.y + Math.sin(b.a) * BOW), a: +b.a.toFixed(3), t: now() };
     let key = 's' + Math.random().toString(36).slice(2);
@@ -352,12 +352,26 @@
     return { throttle: 0 };
   }
 
+  // How hard computer boats play, from Very Easy to Insane (Medium is how they always played). think: seconds
+  // between decisions; lead: how far ahead of a moving boat they aim; wobble: how far off their aim is;
+  // reload: how much slower than you they reload; throttle: how fast they sail.
+  const LEVELS = ['Very Easy', 'Easy', 'Medium', 'Hard', 'Insane'];
+  const BOT_LEVELS = [
+    { think: 0.6, lead: 0, wobble: 0.35, reload: 3, throttle: 0.6 },
+    { think: 0.35, lead: 0.3, wobble: 0.18, reload: 2.3, throttle: 0.72 },
+    { think: 0.15, lead: 0.7, wobble: 0, reload: 1.7, throttle: 0.85 },
+    { think: 0.1, lead: 0.9, wobble: 0, reload: 1.3, throttle: 0.95 },
+    { think: 0.05, lead: 1, wobble: 0, reload: 1, throttle: 1 },
+  ];
+  const savedLevel = () => { const n = Number(store.get('boatbattle-level') ?? 2); return LEVELS[n] ? n : 2; };
+  let botSkill = BOT_LEVELS[2];
+
   // A computer boat: chase the nearest boat (or a crate, if it has no power-up), steer around islands, fire when lined up.
   function botControls(b, dt) {
     b.think -= dt;
     const others = Object.values(game.boats).filter(o => o !== b && alive(o));
     if (b.think <= 0) {
-      b.think = 0.15 + Math.random() * 0.1;
+      b.think = botSkill.think + Math.random() * 0.1;
       let target = null, best = 1e9;
       for (const o of others) { const d = Math.hypot(o.x - b.x, o.y - b.y); if (d < best) { best = d; target = o; } }
       let goal = null;
@@ -367,8 +381,9 @@
       }
       if (!goal && target) {
         // Aim a little ahead of where the target is going.
-        const K = SHOTS[b.kind || 'ball'], lead = best / K.speed * 0.7;
-        goal = { x: target.x + Math.cos(target.a) * target.v * lead, y: target.y + Math.sin(target.a) * target.v * lead, dist: best, K };
+        const K = SHOTS[b.kind || 'ball'], lead = best / K.speed * botSkill.lead, off = (Math.random() - 0.5) * 2 * botSkill.wobble * best;
+        goal = { x: target.x + Math.cos(target.a) * target.v * lead - Math.sin(target.a) * off,
+          y: target.y + Math.sin(target.a) * target.v * lead + Math.cos(target.a) * off, dist: best, K };
       }
       b.goal = goal;
       b.wantFire = false;
@@ -379,7 +394,7 @@
       }
     }
     const g = b.goal;
-    let want = g ? Math.atan2(g.y - b.y, g.x - b.x) : b.a, throttle = 0.85;
+    let want = g ? Math.atan2(g.y - b.y, g.x - b.x) : b.a, throttle = botSkill.throttle;
     // Too close: circle around the target instead of ramming it.
     if (g && !g.crate && g.dist < 110) want += Math.PI / 2;
     // Look ahead for islands and the edge of the sea.
@@ -792,6 +807,11 @@
   for (const el of [stickEl, fireEl]) el.addEventListener('contextmenu', e => e.preventDefault());
 
   // How many computer boats in practice.
+  const levelSeg = $('level');
+  levelSeg.innerHTML = LEVELS.map((name, n) => `<button type="button" data-n="${n}">${name}</button>`).join('');
+  const drawLevel = () => { botSkill = BOT_LEVELS[savedLevel()]; for (const b of levelSeg.children) b.classList.toggle('on', Number(b.dataset.n) === savedLevel()); };
+  levelSeg.onclick = e => { const b = e.target.closest('button'); if (b) { store.set('boatbattle-level', b.dataset.n); drawLevel(); } };
+  drawLevel();
   const botSeg = $('bot-count');
   botSeg.innerHTML = [1, 2, 3, 4, 5, 6, 7].map(n => `<button type="button" data-n="${n}">${n}</button>`).join('');
   const drawBots = () => { const n = Number(store.get('boatbattle-bots')) || 3; for (const b of botSeg.children) b.classList.toggle('on', Number(b.dataset.n) === n); };
